@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base href="/gyaranomi-drinking/">
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="ギャラ飲みアプリ">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="ギャラ飲み">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <title>ギャラ飲みアプリ</title>
+  <link rel="manifest" href="manifest.json">
+  
+  <!-- ❌ Firebase JavaScript SDK を削除（Flutter Web用Firebase SDKと競合するため） -->
+  <!-- Flutter Firebase プラグインが自動的にSDKを読み込みます -->
+  
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: 'Roboto', sans-serif;
+      background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 50%, #fecfef 100%);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    
+    #loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    
+    .loading-text {
+      margin-top: 20px;
+      font-size: 18px;
+      color: #333;
+      font-weight: bold;
+      text-align: center;
+    }
+    
+    .spinner {
+      width: 50px;
+      height: 50px;
+      border: 5px solid #f3f3f3;
+      border-top: 5px solid #ff6b8a;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    /* エラー表示用スタイル */
+    .error-message {
+      background: #ffebee;
+      border: 1px solid #f44336;
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 16px;
+      color: #d32f2f;
+      max-width: 400px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="loading">
+    <div class="spinner"></div>
+    <div class="loading-text">🍷 ギャラ飲みアプリを読み込み中...</div>
+    <div id="error-container"></div>
+  </div>
+  
+  <script>
+    // Flutter初期化完了時にローディング画面を削除
+    window.addEventListener('flutter-first-frame', function () {
+      const loading = document.getElementById('loading');
+      if (loading) {
+        loading.remove();
+      }
+    });
+    
+    // エラーハンドリング
+    window.addEventListener('error', function(e) {
+      console.error('Global error:', e.error);
+      const errorContainer = document.getElementById('error-container');
+      if (errorContainer && e.error && e.error.message) {
+        errorContainer.innerHTML = `
+          <div class="error-message">
+            <strong>⚠️ エラーが発生しました</strong><br>
+            ${e.error.message}
+          </div>
+        `;
+      }
+    });
+    
+    // 5秒後にローディング画面を強制削除（安全装置）
+    setTimeout(function() {
+      const loading = document.getElementById('loading');
+      if (loading) {
+        console.warn('Flutter初期化が完了しませんでした。ローディング画面を削除します。');
+        loading.innerHTML = `
+          <div class="error-message">
+            <strong>⚠️ アプリの読み込みに時間がかかっています</strong><br>
+            ページを再読み込みしてください
+          </div>
+        `;
+      }
+    }, 5000);
+  </script>
+  
+  <script src="main.dart.js" type="application/javascript"></script>
+</body>
+</html>

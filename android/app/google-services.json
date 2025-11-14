@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "358557317386",
+    "project_id": "gyaranomi-drinking",
+    "storage_bucket": "gyaranomi-drinking.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:358557317386:android:729df17a44d5dd0d17a2f3",
+        "android_client_info": {
+          "package_name": "com.example.test"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAh6jHplTHEeDGQD7cC1F7OxDjsHwf0sNU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

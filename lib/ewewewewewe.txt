@@ -1,0 +1,4585 @@
+import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'firebase_options.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  runApp(GalaApp());
+}
+
+class GalaApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'ギャラ飲みアプリ',
+      theme: ThemeData(
+        primarySwatch: Colors.pink,
+      ),
+      home: AuthWrapper(),
+      debugShowCheckedModeBanner: false,
+    );
+  }
+}
+
+class AuthWrapper extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Scaffold(
+            body: Center(
+              child: CircularProgressIndicator(color: Colors.pink.shade600),
+            ),
+          );
+        }
+        
+        if (snapshot.hasData) {
+          return FutureBuilder<DocumentSnapshot>(
+            future: FirebaseFirestore.instance
+                .collection('users')
+                .doc(snapshot.data!.uid)
+                .get(),
+            builder: (context, userSnapshot) {
+              if (userSnapshot.connectionState == ConnectionState.waiting) {
+                return Scaffold(
+                  body: Center(
+                    child: CircularProgressIndicator(color: Colors.pink.shade600),
+                  ),
+                );
+              }
+              
+              if (userSnapshot.hasData && userSnapshot.data!.exists) {
+                final userData = userSnapshot.data!.data() as Map<String, dynamic>;
+                final userType = userData['type'] ?? 'customer';
+                
+                if (userType == 'girl') {
+                  return GirlDashboard(userData: userData, uid: snapshot.data!.uid);
+                } else {
+                  return CustomerDashboard(userData: userData, uid: snapshot.data!.uid);
+                }
+              }
+              
+              return RegisterScreen(firebaseUser: snapshot.data);
+            },
+          );
+        }
+        
+        return LoginScreen();
+      },
+    );
+  }
+}
+
+class LoginScreen extends StatefulWidget {
+  @override
+  _LoginScreenState createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _auth = FirebaseAuth.instance;
+  bool _isLoading = false;
+
+  Future<void> _handleLogin() async {
+    if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
+      _showSnackBar('メールアドレスとパスワードを入力してください', Colors.red);
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      await _auth.signInWithEmailAndPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text.trim(),
+      );
+      
+      _showSnackBar('ログインしました！', Colors.green);
+      
+    } on FirebaseAuthException catch (e) {
+      String message = '';
+      switch (e.code) {
+        case 'user-not-found':
+          message = 'このメールアドレスは登録されていません';
+          break;
+        case 'wrong-password':
+          message = 'パスワードが間違っています';
+          break;
+        case 'invalid-email':
+          message = 'メールアドレスの形式が正しくありません';
+          break;
+        default:
+          message = 'ログインに失敗しました: ${e.message}';
+      }
+      _showSnackBar(message, Colors.red);
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  void _showSnackBar(String message, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: color,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Colors.pink.shade300,
+              Colors.pink.shade500,
+              Colors.purple.shade400,
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.all(32),
+              child: Card(
+                elevation: 20,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Padding(
+                  padding: EdgeInsets.all(40),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '🍷',
+                        style: TextStyle(fontSize: 48),
+                      ),
+                      SizedBox(height: 24),
+                      Text(
+                        'ギャラ飲み',
+                        style: TextStyle(
+                          fontSize: 32,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.pink.shade600,
+                        ),
+                      ),
+                      SizedBox(height: 40),
+                      TextField(
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: InputDecoration(
+                          labelText: 'メールアドレス',
+                          prefixIcon: Icon(Icons.email_outlined),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 20),
+                      TextField(
+                        controller: _passwordController,
+                        obscureText: true,
+                        decoration: InputDecoration(
+                          labelText: 'パスワード',
+                          prefixIcon: Icon(Icons.lock_outline),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 32),
+                      Container(
+                        width: double.infinity,
+                        height: 56,
+                        child: ElevatedButton(
+                          onPressed: _isLoading ? null : _handleLogin,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.pink.shade600,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(15),
+                            ),
+                          ),
+                          child: _isLoading
+                              ? CircularProgressIndicator(color: Colors.white)
+                              : Text(
+                                  'ログイン',
+                                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                ),
+                        ),
+                      ),
+                      SizedBox(height: 20),
+                      TextButton(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => RegisterScreen(),
+                            ),
+                          );
+                        },
+                        child: Text('新規登録はこちら'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class RegisterScreen extends StatefulWidget {
+  final User? firebaseUser;
+  
+  RegisterScreen({this.firebaseUser});
+
+  @override
+  _RegisterScreenState createState() => _RegisterScreenState();
+}
+
+class _RegisterScreenState extends State<RegisterScreen> {
+  String _userType = 'customer';
+  final _nicknameController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _ageController = TextEditingController();
+  final _hourlyRateController = TextEditingController();
+  final _introductionController = TextEditingController();
+  final _locationController = TextEditingController();
+  final _auth = FirebaseAuth.instance;
+  final _firestore = FirebaseFirestore.instance;
+  bool _isLoading = false;
+  List<String> _selectedTags = [];
+
+  final List<String> _availableTags = [
+    '明るい', '聞き上手', '話し好き', '大人しい', 'お酒好き',
+    '笑顔が素敵', '優しい', '元気', 'おしゃべり', '癒し系',
+  ];
+
+  Future<void> _createAccount() async {
+    if (_nicknameController.text.isEmpty) {
+      _showSnackBar('ニックネームを入力してください', Colors.red);
+      return;
+    }
+
+    if (widget.firebaseUser == null && 
+        (_emailController.text.isEmpty || _passwordController.text.isEmpty)) {
+      _showSnackBar('メールアドレスとパスワードを入力してください', Colors.red);
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      User? firebaseUser = widget.firebaseUser;
+      
+      if (firebaseUser == null) {
+        UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
+          email: _emailController.text.trim(),
+          password: _passwordController.text.trim(),
+        );
+        firebaseUser = userCredential.user!;
+      }
+
+      Map<String, dynamic> userData = {
+        'type': _userType,
+        'nickname': _nicknameController.text,
+        'email': firebaseUser.email ?? _emailController.text,
+        'age': int.tryParse(_ageController.text) ?? 25,
+        'location': _locationController.text.isEmpty ? '東京都' : _locationController.text,
+        'isOnline': true,
+        'createdAt': FieldValue.serverTimestamp(),
+        'lastSeen': FieldValue.serverTimestamp(),
+      };
+
+      if (_userType == 'girl') {
+        userData.addAll({
+          'hourlyRate': _hourlyRateController.text.isEmpty ? '8000' : _hourlyRateController.text,
+          'introduction': _introductionController.text.isEmpty ? 'よろしくお願いします♪' : _introductionController.text,
+          'tags': _selectedTags.isEmpty ? ['明るい', '聞き上手'] : _selectedTags,
+          'rating': 5.0,
+          'reviewCount': 0,
+          'totalEarnings': 0,
+          'totalSessions': 0,
+        });
+      }
+
+      await _firestore.collection('users').doc(firebaseUser.uid).set(userData);
+
+      _showSnackBar('✨ アカウントが作成されました！', Colors.green);
+
+    } on FirebaseAuthException catch (e) {
+      String message = '';
+      switch (e.code) {
+        case 'weak-password':
+          message = 'パスワードが弱すぎます';
+          break;
+        case 'email-already-in-use':
+          message = 'このメールアドレスは既に使用されています';
+          break;
+        default:
+          message = 'アカウント作成に失敗しました';
+      }
+      _showSnackBar(message, Colors.red);
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  void _showSnackBar(String message, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: color,
+      ),
+    );
+  }
+
+  Widget _buildUserTypeCard(String type, String icon, String title, MaterialColor color) {
+    bool isSelected = _userType == type;
+    return GestureDetector(
+      onTap: () => setState(() => _userType = type),
+      child: Container(
+        padding: EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: isSelected ? color.shade100 : Colors.white,
+          border: Border.all(
+            color: isSelected ? color.shade500 : Colors.grey.shade300,
+            width: isSelected ? 2 : 1,
+          ),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          children: [
+            Text(icon, style: TextStyle(fontSize: 40)),
+            SizedBox(height: 12),
+            Text(
+              title,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: isSelected ? color.shade700 : Colors.grey.shade700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('新規登録'),
+        backgroundColor: Colors.pink.shade600,
+        foregroundColor: Colors.white,
+      ),
+      body: SingleChildScrollView(
+        padding: EdgeInsets.all(20),
+        child: Column(
+          children: [
+            Text(
+              '登録タイプを選択',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildUserTypeCard('customer', '👨‍💼', 'お客様', Colors.blue),
+                ),
+                SizedBox(width: 16),
+                Expanded(
+                  child: _buildUserTypeCard('girl', '👩‍💼', 'キャスト', Colors.pink),
+                ),
+              ],
+            ),
+            SizedBox(height: 24),
+            Card(
+              elevation: 4,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Padding(
+                padding: EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    TextField(
+                      controller: _nicknameController,
+                      decoration: InputDecoration(
+                        labelText: 'ニックネーム',
+                        prefixIcon: Icon(Icons.person_outline),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                    if (widget.firebaseUser == null) ...[
+                      SizedBox(height: 16),
+                      TextField(
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: InputDecoration(
+                          labelText: 'メールアドレス',
+                          prefixIcon: Icon(Icons.email_outlined),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 16),
+                      TextField(
+                        controller: _passwordController,
+                        obscureText: true,
+                        decoration: InputDecoration(
+                          labelText: 'パスワード',
+                          prefixIcon: Icon(Icons.lock_outline),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ],
+                    SizedBox(height: 16),
+                    TextField(
+                      controller: _ageController,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: '年齢',
+                        prefixIcon: Icon(Icons.cake_outlined),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: 16),
+                    TextField(
+                      controller: _locationController,
+                      decoration: InputDecoration(
+                        labelText: '地域',
+                        hintText: '東京都',
+                        prefixIcon: Icon(Icons.location_on_outlined),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                    if (_userType == 'girl') ...[
+                      SizedBox(height: 20),
+                      TextField(
+                        controller: _hourlyRateController,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: '時給',
+                          hintText: '8000',
+                          suffixText: '円/時間',
+                          prefixIcon: Icon(Icons.monetization_on_outlined),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 16),
+                      TextField(
+                        controller: _introductionController,
+                        maxLines: 3,
+                        decoration: InputDecoration(
+                          labelText: '自己紹介',
+                          hintText: '簡単な自己紹介をお書きください',
+                          prefixIcon: Icon(Icons.edit_outlined),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 20),
+                      Text(
+                        'タグ選択（複数選択可）',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _availableTags.map((tag) {
+                          final isSelected = _selectedTags.contains(tag);
+                          return GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                if (isSelected) {
+                                  _selectedTags.remove(tag);
+                                } else {
+                                  _selectedTags.add(tag);
+                                }
+                              });
+                            },
+                            child: AnimatedContainer(
+                              duration: Duration(milliseconds: 200),
+                              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: isSelected ? Colors.pink.shade500 : Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(25),
+                                border: Border.all(
+                                  color: isSelected ? Colors.pink.shade500 : Colors.grey.shade300,
+                                ),
+                                boxShadow: isSelected ? [
+                                  BoxShadow(
+                                    color: Colors.pink.shade200,
+                                    blurRadius: 4,
+                                    offset: Offset(0, 2),
+                                  ),
+                                ] : null,
+                              ),
+                              child: Text(
+                                tag,
+                                style: TextStyle(
+                                  color: isSelected ? Colors.white : Colors.grey.shade700,
+                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                ),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            SizedBox(height: 32),
+            Container(
+              width: double.infinity,
+              height: 56,
+              child: ElevatedButton(
+                onPressed: _isLoading ? null : _createAccount,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.pink.shade600,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                  elevation: 5,
+                ),
+                child: _isLoading
+                    ? CircularProgressIndicator(color: Colors.white)
+                    : Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(_userType == 'girl' ? Icons.person_add : Icons.account_circle, size: 20),
+                          SizedBox(width: 8),
+                          Text(
+                            _userType == 'girl' ? 'キャスト登録' : 'アカウント作成',
+                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class CustomerDashboard extends StatefulWidget {
+  final Map<String, dynamic> userData;
+  final String uid;
+
+  CustomerDashboard({required this.userData, required this.uid});
+
+  @override
+  _CustomerDashboardState createState() => _CustomerDashboardState();
+}
+
+class _CustomerDashboardState extends State<CustomerDashboard> {
+  String? _selectedLocation;
+  bool _showOfflineUsers = false;
+  int _currentIndex = 0;
+  final List<String> _locations = [
+    '全ての地域',
+    '東京都',
+    '神奈川県',
+    '千葉県',
+    '埼玉県',
+    '大阪府',
+    '京都府',
+    '兵庫県',
+    '愛知県',
+    '福岡県',
+    '北海道',
+    'その他'
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedLocation = '全ての地域';
+  }
+
+  Stream<QuerySnapshot> _getFilteredStream() {
+    Query query = FirebaseFirestore.instance
+        .collection('users')
+        .where('type', isEqualTo: 'girl');
+    
+    if (!_showOfflineUsers) {
+      query = query.where('isOnline', isEqualTo: true);
+    }
+    
+    if (_selectedLocation != null && _selectedLocation != '全ての地域') {
+      query = query.where('location', isEqualTo: _selectedLocation);
+    }
+    
+    return query.snapshots();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_getAppBarTitle()),
+        backgroundColor: Colors.blue.shade600,
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: Icon(Icons.logout),
+            onPressed: () => _logout(context),
+          ),
+          Padding(
+            padding: EdgeInsets.only(right: 16),
+            child: Center(
+              child: Text('${widget.userData['nickname']}さん'),
+            ),
+          ),
+        ],
+        automaticallyImplyLeading: false,
+      ),
+      body: _buildCurrentPage(),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) => setState(() => _currentIndex = index),
+        type: BottomNavigationBarType.fixed,
+        selectedItemColor: Colors.pink.shade600,
+        unselectedItemColor: Colors.grey,
+        items: [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.dashboard),
+            label: 'ダッシュボード',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.calendar_today),
+            label: 'スケジュール',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.book_online),
+            label: '予約管理',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.message),
+            label: 'メッセージ',
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getAppBarTitle() {
+    switch (_currentIndex) {
+      case 0: return 'キャストダッシュボード';
+      case 1: return 'スケジュール管理';
+      case 2: return '予約管理';
+      case 3: return 'メッセージ';
+      default: return 'キャストダッシュボード';
+    }
+  }
+
+  Widget _buildCurrentPage() {
+    switch (_currentIndex) {
+      case 0: return _buildDashboardPage();
+      case 1: return GirlSchedulePage(userData: widget.userData, uid: widget.uid);
+      case 2: return GirlBookingPage(userData: widget.userData, uid: widget.uid);
+      case 3: return GirlMessagesPage(userData: widget.userData, uid: widget.uid);
+      default: return _buildDashboardPage();
+    }
+  }
+
+  Widget _buildDashboardPage() {
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(16),
+      child: Column(
+        children: [
+          Container(
+            width: double.infinity,
+            padding: EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Colors.green.shade50, Colors.green.shade100],
+              ),
+              border: Border.all(color: Colors.green.shade200),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.green.shade100.withOpacity(0.5),
+                  blurRadius: 8,
+                  offset: Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                Text(
+                  '🎉 キャスト登録完了！',
+                  style: TextStyle(
+                    color: Colors.green.shade700,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 18,
+                  ),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'お客様からの連絡をお待ちください♪',
+                  style: TextStyle(
+                    color: Colors.green.shade700,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SizedBox(height: 16),
+          _buildStatsCards(),
+          SizedBox(height: 16),
+          _buildProfileCard(context),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatsCards() {
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance.collection('users').doc(widget.uid).snapshots(),
+      builder: (context, snapshot) {
+        Map<String, dynamic> userData = widget.userData;
+        if (snapshot.hasData && snapshot.data!.exists) {
+          userData = snapshot.data!.data() as Map<String, dynamic>;
+        }
+
+        return Row(
+          children: [
+            Expanded(
+              child: _buildStatCard(
+                '総収益',
+                '¥${userData['totalEarnings'] ?? 0}',
+                Icons.monetization_on,
+                Colors.green,
+              ),
+            ),
+            SizedBox(width: 12),
+            Expanded(
+              child: _buildStatCard(
+                'セッション数',
+                '${userData['totalSessions'] ?? 0}回',
+                Icons.event,
+                Colors.blue,
+              ),
+            ),
+            SizedBox(width: 12),
+            Expanded(
+              child: _buildStatCard(
+                '評価',
+                '${(userData['rating'] ?? 5.0).toStringAsFixed(1)}',
+                Icons.star,
+                Colors.amber,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildStatCard(String title, String value, IconData icon, MaterialColor color) {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Container(
+        padding: EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          gradient: LinearGradient(
+            colors: [Colors.white, color.shade50],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color.shade600, size: 28),
+            SizedBox(height: 8),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: color.shade700,
+              ),
+            ),
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey.shade600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProfileCard(BuildContext context) {
+    return Card(
+      elevation: 8,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          gradient: LinearGradient(
+            colors: [Colors.white, Colors.pink.shade50.withOpacity(0.3)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Padding(
+          padding: EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 80,
+                    height: 80,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.pink.shade100,
+                      border: Border.all(
+                        color: (widget.userData['isOnline'] == true) ? Colors.green : Colors.grey.shade400,
+                        width: 3,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.pink.shade200.withOpacity(0.5),
+                          blurRadius: 8,
+                          offset: Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Center(
+                      child: Text(
+                        '👩‍💼',
+                        style: TextStyle(fontSize: 40),
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'プロフィール',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.grey.shade800,
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'お客様に表示される情報',
+                          style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                        ),
+                        SizedBox(height: 8),
+                        Container(
+                          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: (widget.userData['isOnline'] == true) ? Colors.green.shade50 : Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: (widget.userData['isOnline'] == true) ? Colors.green.shade200 : Colors.grey.shade300,
+                            ),
+                          ),
+                          child: Text(
+                            (widget.userData['isOnline'] == true) ? '🟢 オンライン' : '⚫ オフライン',
+                            style: TextStyle(
+                              color: (widget.userData['isOnline'] == true) ? Colors.green.shade700 : Colors.grey.shade600,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 20),
+              _buildProfileRow('ニックネーム', widget.userData['nickname'] ?? ''),
+              _buildProfileRow('年齢', '${widget.userData['age']}歳'),
+              if (widget.userData['hourlyRate'] != null)
+                _buildProfileRow('時給', '${widget.userData['hourlyRate']}円/時間'),
+              if (widget.userData['location'] != null)
+                _buildProfileRow('地域', widget.userData['location']),
+              if (widget.userData['introduction'] != null) ...[
+                SizedBox(height: 16),
+                Text(
+                  '自己紹介:',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey.shade700,
+                  ),
+                ),
+                SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: Text(
+                    widget.userData['introduction'],
+                    style: TextStyle(fontSize: 14, height: 1.4),
+                  ),
+                ),
+              ],
+              if (widget.userData['tags'] != null && (widget.userData['tags'] as List).isNotEmpty) ...[
+                SizedBox(height: 16),
+                Text(
+                  'タグ:',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey.shade700,
+                  ),
+                ),
+                SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: (widget.userData['tags'] as List<dynamic>).map((tag) {
+                    return Container(
+                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.pink.shade50,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.pink.shade200),
+                      ),
+                      child: Text(
+                        tag.toString(),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.pink.shade700,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+              SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () => _toggleOnlineStatus(context),
+                      icon: Icon((widget.userData['isOnline'] == true) ? Icons.pause : Icons.play_arrow),
+                      label: Text((widget.userData['isOnline'] == true) ? 'オフラインにする' : 'オンラインにする'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: (widget.userData['isOnline'] == true) ? Colors.grey.shade600 : Colors.green.shade600,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        elevation: 3,
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _editProfile(context),
+                      icon: Icon(Icons.edit),
+                      label: Text('プロフィール編集'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.pink.shade600,
+                        side: BorderSide(color: Colors.pink.shade600),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProfileRow(String label, String value) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.grey.shade600,
+              fontSize: 14,
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _toggleOnlineStatus(BuildContext context) async {
+    try {
+      final newStatus = !(widget.userData['isOnline'] == true);
+      
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.uid)
+          .update({
+        'isOnline': newStatus,
+        'lastSeen': FieldValue.serverTimestamp(),
+      });
+
+      setState(() {
+        widget.userData['isOnline'] = newStatus;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            newStatus ? '✅ オンラインになりました♪' : '⏸️ オフラインになりました',
+          ),
+          backgroundColor: newStatus ? Colors.green : Colors.grey.shade600,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('ステータス更新に失敗しました: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _editProfile(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => EditProfileScreen(userData: widget.userData, uid: widget.uid),
+      ),
+    );
+  }
+
+  void _logout(BuildContext context) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.uid)
+          .update({
+        'isOnline': false,
+        'lastSeen': FieldValue.serverTimestamp(),
+      });
+
+      await FirebaseAuth.instance.signOut();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('ログアウトに失敗しました')),
+      );
+    }
+  }
+}
+
+// 📅 キャスト用スケジュール管理画面
+class GirlSchedulePage extends StatefulWidget {
+  final Map<String, dynamic> userData;
+  final String uid;
+
+  GirlSchedulePage({required this.userData, required this.uid});
+
+  @override
+  _GirlSchedulePageState createState() => _GirlSchedulePageState();
+}
+
+class _GirlSchedulePageState extends State<GirlSchedulePage> {
+  DateTime _selectedDate = DateTime.now();
+  TimeOfDay _startTime = TimeOfDay(hour: 18, minute: 0);
+  TimeOfDay _endTime = TimeOfDay(hour: 22, minute: 0);
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Container(
+          padding: EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Colors.pink.shade50, Colors.purple.shade50],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+          child: Column(
+            children: [
+              Text(
+                '空き時間を設定',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.pink.shade700,
+                ),
+              ),
+              SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _selectDate(context),
+                      icon: Icon(Icons.calendar_today),
+                      label: Text('${_selectedDate.month}/${_selectedDate.day}'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.pink.shade600,
+                        side: BorderSide(color: Colors.pink.shade600),
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _selectTimeRange(context),
+                      icon: Icon(Icons.access_time),
+                      label: Text('${_startTime.format(context)} - ${_endTime.format(context)}'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.pink.shade600,
+                        side: BorderSide(color: Colors.pink.shade600),
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: _addAvailability,
+                icon: Icon(Icons.add),
+                label: Text('空き時間を追加'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.pink.shade600,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('availability')
+                .where('girlUid', isEqualTo: widget.uid)
+                .orderBy('date', descending: false)
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return Center(child: CircularProgressIndicator());
+              }
+
+              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                return Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text('📅', style: TextStyle(fontSize: 64)),
+                      SizedBox(height: 16),
+                      Text(
+                        '空き時間が設定されていません',
+                        style: TextStyle(fontSize: 18, color: Colors.grey.shade600),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        '上記のフォームから空き時間を追加してください',
+                        style: TextStyle(fontSize: 14, color: Colors.grey.shade500),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              final availabilities = snapshot.data!.docs;
+
+              return ListView.builder(
+                padding: EdgeInsets.all(16),
+                itemCount: availabilities.length,
+                itemBuilder: (context, index) {
+                  final availability = availabilities[index].data() as Map<String, dynamic>;
+                  return _buildAvailabilityCard(availability, availabilities[index].id);
+                },
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAvailabilityCard(Map<String, dynamic> availability, String docId) {
+    final date = (availability['date'] as Timestamp).toDate();
+    final isBooked = availability['isBooked'] ?? false;
+
+    return Card(
+      margin: EdgeInsets.only(bottom: 12),
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: LinearGradient(
+            colors: [
+              Colors.white,
+              isBooked ? Colors.grey.shade50 : Colors.green.shade50.withOpacity(0.3)
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isBooked ? Colors.grey.shade200 : Colors.green.shade100,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  isBooked ? Icons.event_busy : Icons.event_available,
+                  color: isBooked ? Colors.grey.shade600 : Colors.green.shade600,
+                ),
+              ),
+              SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${date.month}/${date.day} (${_getWeekday(date.weekday)})',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: isBooked ? Colors.grey.shade600 : Colors.grey.shade800,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      '${availability['startTime']} - ${availability['endTime']}',
+                      style: TextStyle(
+                        color: isBooked ? Colors.grey.shade500 : Colors.grey.shade600,
+                      ),
+                    ),
+                    if (isBooked)
+                      Text(
+                        '予約済み',
+                        style: TextStyle(
+                          color: Colors.grey.shade500,
+                          fontSize: 12,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              if (!isBooked)
+                IconButton(
+                  onPressed: () => _deleteAvailability(docId),
+                  icon: Icon(Icons.delete, color: Colors.red.shade400),
+                  tooltip: '削除',
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _getWeekday(int weekday) {
+    const weekdays = ['月', '火', '水', '木', '金', '土', '日'];
+    return weekdays[weekday - 1];
+  }
+
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(Duration(days: 90)),
+    );
+    if (picked != null) {
+      setState(() {
+        _selectedDate = picked;
+      });
+    }
+  }
+
+  Future<void> _selectTimeRange(BuildContext context) async {
+    final TimeOfDay? startPicked = await showTimePicker(
+      context: context,
+      initialTime: _startTime,
+    );
+    if (startPicked != null) {
+      final TimeOfDay? endPicked = await showTimePicker(
+        context: context,
+        initialTime: _endTime,
+      );
+      if (endPicked != null) {
+        setState(() {
+          _startTime = startPicked;
+          _endTime = endPicked;
+        });
+      }
+    }
+  }
+
+  Future<void> _addAvailability() async {
+    try {
+      final availabilityData = {
+        'girlUid': widget.uid,
+        'date': Timestamp.fromDate(_selectedDate),
+        'startTime': _startTime.format(context),
+        'endTime': _endTime.format(context),
+        'isBooked': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      };
+
+      await FirebaseFirestore.instance.collection('availability').add(availabilityData);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✨ 空き時間を追加しました！'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('追加に失敗しました: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _deleteAvailability(String docId) async {
+    try {
+      await FirebaseFirestore.instance.collection('availability').doc(docId).delete();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('空き時間を削除しました'),
+          backgroundColor: Colors.grey.shade600,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('削除に失敗しました: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}
+
+// 📋 キャスト用予約管理画面
+class GirlBookingPage extends StatelessWidget {
+  final Map<String, dynamic> userData;
+  final String uid;
+
+  GirlBookingPage({required this.userData, required this.uid});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('bookings')
+          .where('girlUid', isEqualTo: uid)
+          .orderBy('date', descending: false)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(child: CircularProgressIndicator());
+        }
+
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text('📝', style: TextStyle(fontSize: 64)),
+                SizedBox(height: 16),
+                Text(
+                  'まだ予約リクエストがありません',
+                  style: TextStyle(fontSize: 18, color: Colors.grey.shade600),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'お客様からの予約をお待ちください♪',
+                  style: TextStyle(fontSize: 14, color: Colors.grey.shade500),
+                ),
+              ],
+            ),
+          );
+        }
+
+        final bookings = snapshot.data!.docs;
+
+        return ListView.builder(
+          padding: EdgeInsets.all(16),
+          itemCount: bookings.length,
+          itemBuilder: (context, index) {
+            final booking = bookings[index].data() as Map<String, dynamic>;
+            return _buildBookingCard(context, booking, bookings[index].id);
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildBookingCard(BuildContext context, Map<String, dynamic> booking, String bookingId) {
+    final date = (booking['date'] as Timestamp).toDate();
+    final status = booking['status'] ?? 'pending';
+    
+    Color statusColor;
+    String statusText;
+    IconData statusIcon;
+    
+    switch (status) {
+      case 'confirmed':
+        statusColor = Colors.green;
+        statusText = '予約確定';
+        statusIcon = Icons.check_circle;
+        break;
+      case 'rejected':
+        statusColor = Colors.red;
+        statusText = '予約拒否';
+        statusIcon = Icons.cancel;
+        break;
+      case 'completed':
+        statusColor = Colors.blue;
+        statusText = '完了';
+        statusIcon = Icons.done_all;
+        break;
+      case 'cancelled':
+        statusColor = Colors.grey;
+        statusText = 'キャンセル';
+        statusIcon = Icons.cancel_outlined;
+        break;
+      default:
+        statusColor = Colors.orange;
+        statusText = '承認待ち';
+        statusIcon = Icons.schedule;
+    }
+
+    return Card(
+      margin: EdgeInsets.only(bottom: 16),
+      elevation: 8,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: LinearGradient(
+            colors: [Colors.white, statusColor.withOpacity(0.1)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Padding(
+          padding: EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    booking['customerName'] ?? '',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey.shade800,
+                    ),
+                  ),
+                  Container(
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: statusColor,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(statusIcon, size: 16, color: Colors.white),
+                        SizedBox(width: 4),
+                        Text(
+                          statusText,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 12),
+              Row(
+                children: [
+                  Icon(Icons.calendar_today, size: 16, color: Colors.grey.shade600),
+                  SizedBox(width: 8),
+                  Text('${date.month}/${date.day} (${_getWeekday(date.weekday)})'),
+                  SizedBox(width: 16),
+                  Icon(Icons.access_time, size: 16, color: Colors.grey.shade600),
+                  SizedBox(width: 8),
+                  Text('${booking['startTime']} - ${booking['endTime']}'),
+                ],
+              ),
+              SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(Icons.monetization_on, size: 16, color: Colors.grey.shade600),
+                  SizedBox(width: 8),
+                  Text('時給: ${booking['hourlyRate']}円'),
+                ],
+              ),
+              if (status == 'pending') ...[
+                SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => _updateBookingStatus(context, bookingId, 'confirmed'),
+                        icon: Icon(Icons.check, size: 18),
+                        label: Text('承認'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green.shade600,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => _updateBookingStatus(context, bookingId, 'rejected'),
+                        icon: Icon(Icons.close, size: 18),
+                        label: Text('拒否'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red.shade600,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              if (status == 'confirmed') ...[
+                SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: () => _updateBookingStatus(context, bookingId, 'completed'),
+                  icon: Icon(Icons.done_all, size: 18),
+                  label: Text('完了にする'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue.shade600,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _getWeekday(int weekday) {
+    const weekdays = ['月', '火', '水', '木', '金', '土', '日'];
+    return weekdays[weekday - 1];
+  }
+
+  Future<void> _updateBookingStatus(BuildContext context, String bookingId, String newStatus) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('bookings')
+          .doc(bookingId)
+          .update({'status': newStatus});
+
+      String message;
+      Color color;
+      switch (newStatus) {
+        case 'confirmed':
+          message = '✅ 予約を承認しました';
+          color = Colors.green;
+          break;
+        case 'rejected':
+          message = '❌ 予約を拒否しました';
+          color = Colors.red;
+          break;
+        case 'completed':
+          message = '🎉 予約を完了にしました';
+          color = Colors.blue;
+          break;
+        default:
+          message = '予約ステータスを更新しました';
+          color = Colors.grey;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: color,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('更新に失敗しました: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}
+
+// 💬 キャスト用メッセージ画面
+class GirlMessagesPage extends StatelessWidget {
+  final Map<String, dynamic> userData;
+  final String uid;
+
+  GirlMessagesPage({required this.userData, required this.uid});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('chats')
+          .where('participants', arrayContains: uid)
+          .orderBy('lastMessageTime', descending: true)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(child: CircularProgressIndicator());
+        }
+
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text('💌', style: TextStyle(fontSize: 64)),
+                SizedBox(height: 16),
+                Text(
+                  'まだメッセージはありません',
+                  style: TextStyle(fontSize: 18, color: Colors.grey.shade600),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'お客様からの連絡をお待ちください♪',
+                  style: TextStyle(fontSize: 14, color: Colors.grey.shade500),
+                ),
+              ],
+            ),
+          );
+        }
+
+        final chats = snapshot.data!.docs;
+
+        return ListView.builder(
+          padding: EdgeInsets.all(16),
+          itemCount: chats.length,
+          itemBuilder: (context, index) {
+            final chatData = chats[index].data() as Map<String, dynamic>;
+            final participants = List<String>.from(chatData['participants'] ?? []);
+            final otherUserId = participants.firstWhere((id) => id != uid, orElse: () => '');
+            
+            if (otherUserId.isEmpty) return SizedBox.shrink();
+            
+            return FutureBuilder<DocumentSnapshot>(
+              future: FirebaseFirestore.instance.collection('users').doc(otherUserId).get(),
+              builder: (context, userSnapshot) {
+                if (!userSnapshot.hasData || !userSnapshot.data!.exists) {
+                  return SizedBox.shrink();
+                }
+
+                final otherUserData = userSnapshot.data!.data() as Map<String, dynamic>;
+                return _buildChatItem(context, chatData, otherUserData, otherUserId);
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildChatItem(BuildContext context, Map<String, dynamic> chatData, Map<String, dynamic> otherUserData, String otherUserId) {
+    final lastMessage = chatData['lastMessage'] ?? '';
+    final lastMessageTime = (chatData['lastMessageTime'] as Timestamp?)?.toDate();
+
+    return Card(
+      margin: EdgeInsets.only(bottom: 12),
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: InkWell(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => MessageScreen(
+                customerData: otherUserData,
+                customerUid: otherUserId,
+                girlData: userData,
+                girlUid: uid,
+              ),
+            ),
+          );
+        },
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: EdgeInsets.all(16),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 25,
+                backgroundColor: Colors.blue.shade100,
+                child: Text('👨‍💼', style: TextStyle(fontSize: 24)),
+              ),
+              SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          otherUserData['nickname'] ?? '',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                        if (lastMessageTime != null)
+                          Text(
+                            '${lastMessageTime.month}/${lastMessageTime.day}',
+                            style: TextStyle(
+                              color: Colors.grey.shade500,
+                              fontSize: 12,
+                            ),
+                          ),
+                      ],
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      lastMessage,
+                      style: TextStyle(
+                        color: Colors.grey.shade600,
+                        fontSize: 14,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class EditProfileScreen extends StatefulWidget {
+  final Map<String, dynamic> userData;
+  final String uid;
+
+  EditProfileScreen({required this.userData, required this.uid});
+
+  @override
+  _EditProfileScreenState createState() => _EditProfileScreenState();
+}
+
+class _EditProfileScreenState extends State<EditProfileScreen> {
+  final _nicknameController = TextEditingController();
+  final _ageController = TextEditingController();
+  final _hourlyRateController = TextEditingController();
+  final _introductionController = TextEditingController();
+  final _locationController = TextEditingController();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  bool _isLoading = false;
+  List<String> _selectedTags = [];
+
+  final List<String> _availableTags = [
+    '明るい', '聞き上手', '話し好き', '大人しい', 'お酒好き',
+    '笑顔が素敵', '優しい', '元気', 'おしゃべり', '癒し系',
+    'かわいい系', 'きれい系', 'クール', 'ナチュラル', 'セクシー'
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _nicknameController.text = widget.userData['nickname'] ?? '';
+    _ageController.text = widget.userData['age']?.toString() ?? '';
+    _hourlyRateController.text = widget.userData['hourlyRate'] ?? '';
+    _introductionController.text = widget.userData['introduction'] ?? '';
+    _locationController.text = widget.userData['location'] ?? '';
+    _selectedTags = List<String>.from(widget.userData['tags'] ?? []);
+  }
+
+  Future<void> _updateProfile() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      Map<String, dynamic> updateData = {
+        'nickname': _nicknameController.text,
+        'age': int.tryParse(_ageController.text) ?? widget.userData['age'],
+        'hourlyRate': _hourlyRateController.text.isEmpty ? null : _hourlyRateController.text,
+        'introduction': _introductionController.text.isEmpty ? null : _introductionController.text,
+        'location': _locationController.text.isEmpty ? null : _locationController.text,
+        'tags': _selectedTags,
+        'lastSeen': FieldValue.serverTimestamp(),
+      };
+
+      await _firestore.collection('users').doc(widget.uid).update(updateData);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✨ プロフィールを更新しました♪'),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+      Navigator.pop(context);
+
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('更新に失敗しました: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('プロフィール編集'),
+        backgroundColor: Colors.pink.shade600,
+        foregroundColor: Colors.white,
+        actions: [
+          TextButton(
+            onPressed: _isLoading ? null : _updateProfile,
+            child: Text(
+              '保存',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Card(
+              elevation: 4,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Padding(
+                padding: EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    TextField(
+                      controller: _nicknameController,
+                      decoration: InputDecoration(
+                        labelText: 'ニックネーム',
+                        prefixIcon: Icon(Icons.person_outline),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: 16),
+                    TextField(
+                      controller: _ageController,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: '年齢',
+                        prefixIcon: Icon(Icons.cake_outlined),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: 16),
+                    TextField(
+                      controller: _locationController,
+                      decoration: InputDecoration(
+                        labelText: '地域',
+                        prefixIcon: Icon(Icons.location_on_outlined),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: 16),
+                    TextField(
+                      controller: _hourlyRateController,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: '時給',
+                        suffixText: '円/時間',
+                        prefixIcon: Icon(Icons.monetization_on_outlined),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: 16),
+                    TextField(
+                      controller: _introductionController,
+                      maxLines: 4,
+                      decoration: InputDecoration(
+                        labelText: '自己紹介',
+                        prefixIcon: Icon(Icons.edit_outlined),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            SizedBox(height: 24),
+            Text(
+              'タグ選択',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey.shade800,
+              ),
+            ),
+            SizedBox(height: 8),
+            Text(
+              'あなたの特徴を表すタグを選んでください（複数選択可）',
+              style: TextStyle(
+                color: Colors.grey.shade600,
+                fontSize: 14,
+              ),
+            ),
+            SizedBox(height: 16),
+            Card(
+              elevation: 4,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Padding(
+                padding: EdgeInsets.all(20),
+                child: Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: _availableTags.map((tag) {
+                    final isSelected = _selectedTags.contains(tag);
+                    return GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          if (isSelected) {
+                            _selectedTags.remove(tag);
+                          } else {
+                            _selectedTags.add(tag);
+                          }
+                        });
+                      },
+                      child: AnimatedContainer(
+                        duration: Duration(milliseconds: 200),
+                        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: isSelected ? Colors.pink.shade500 : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: isSelected ? Colors.pink.shade500 : Colors.grey.shade300,
+                            width: 1,
+                          ),
+                          boxShadow: isSelected ? [
+                            BoxShadow(
+                              color: Colors.pink.shade200.withOpacity(0.5),
+                              blurRadius: 4,
+                              offset: Offset(0, 2),
+                            ),
+                          ] : null,
+                        ),
+                        child: Text(
+                          tag,
+                          style: TextStyle(
+                            color: isSelected ? Colors.white : Colors.grey.shade700,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+            SizedBox(height: 32),
+            Container(
+              width: double.infinity,
+              height: 56,
+              child: ElevatedButton(
+                onPressed: _isLoading ? null : _updateProfile,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.pink.shade600,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                  elevation: 5,
+                ),
+                child: _isLoading
+                    ? CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
+                    : Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.save, size: 20),
+                          SizedBox(width: 8),
+                          Text(
+                            'プロフィールを更新',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _nicknameController.dispose();
+    _ageController.dispose();
+    _hourlyRateController.dispose();
+    _introductionController.dispose();
+    _locationController.dispose();
+    super.dispose();
+  }
+}
+
+class MessageScreen extends StatefulWidget {
+  final Map<String, dynamic> customerData;
+  final String customerUid;
+  final Map<String, dynamic> girlData;
+  final String girlUid;
+
+  MessageScreen({
+    required this.customerData,
+    required this.customerUid,
+    required this.girlData,
+    required this.girlUid,
+  });
+
+  @override
+  _MessageScreenState createState() => _MessageScreenState();
+}
+
+class _MessageScreenState extends State<MessageScreen> {
+  final TextEditingController _messageController = TextEditingController();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final ScrollController _scrollController = ScrollController();
+  late String chatId;
+  late String currentUserId;
+
+  @override
+  void initState() {
+    super.initState();
+    List<String> ids = [widget.customerUid, widget.girlUid];
+    ids.sort();
+    chatId = ids.join('_');
+    currentUserId = FirebaseAuth.instance.currentUser?.uid ?? '';
+    _createInitialMessage();
+  }
+
+  Future<void> _createInitialMessage() async {
+    try {
+      final existingMessages = await _firestore
+          .collection('chats')
+          .doc(chatId)
+          .collection('messages')
+          .limit(1)
+          .get();
+
+      if (existingMessages.docs.isEmpty && currentUserId == widget.girlUid) {
+        await _sendMessage(
+          '${widget.customerData['nickname']}さん、はじめまして！${widget.girlData['nickname']}です😊\nプロフィールを見ていただいてありがとうございます♪',
+          widget.girlUid,
+        );
+      }
+    } catch (e) {
+      print('初回メッセージ作成エラー: $e');
+    }
+  }
+
+  Future<void> _sendMessage(String text, String senderId) async {
+    if (text.trim().isEmpty) return;
+
+    try {
+      await _firestore.collection('chats').doc(chatId).set({
+        'participants': [widget.customerUid, widget.girlUid],
+        'lastMessage': text.trim(),
+        'lastMessageTime': FieldValue.serverTimestamp(),
+        'lastMessageSender': senderId,
+        'createdAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      await _firestore
+          .collection('chats')
+          .doc(chatId)
+          .collection('messages')
+          .add({
+        'text': text.trim(),
+        'senderId': senderId,
+        'timestamp': FieldValue.serverTimestamp(),
+        'isRead': false,
+        'chatId': chatId,
+      });
+
+      Future.delayed(Duration(milliseconds: 500), () {
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+
+    } catch (e) {
+      print('メッセージ送信エラー詳細: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('メッセージ送信に失敗しました。もう一度お試しください。'),
+          backgroundColor: Colors.red,
+          action: SnackBarAction(
+            label: '再試行',
+            textColor: Colors.white,
+            onPressed: () => _sendMessage(text, senderId),
+          ),
+        ),
+      );
+    }
+  }
+
+  void _handleSendMessage() {
+    final text = _messageController.text;
+    _messageController.clear();
+    _sendMessage(text, currentUserId);
+  }
+
+  String _formatTime(DateTime dateTime) {
+    final now = DateTime.now();
+    final difference = now.difference(dateTime);
+
+    if (difference.inDays > 0) {
+      return '${dateTime.month}/${dateTime.day}';
+    } else if (difference.inHours > 0) {
+      return '${difference.inHours}時間前';
+    } else if (difference.inMinutes > 0) {
+      return '${difference.inMinutes}分前';
+    } else {
+      return 'たった今';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isGirl = currentUserId == widget.girlUid;
+    final otherUserData = isGirl ? widget.customerData : widget.girlData;
+    final appBarColor = isGirl ? Colors.pink.shade600 : Colors.green.shade600;
+
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: appBarColor,
+        foregroundColor: Colors.white,
+        title: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isGirl ? Colors.pink.shade100 : Colors.green.shade100,
+                border: Border.all(color: Colors.white, width: 2),
+              ),
+              child: Center(
+                child: Text(
+                  isGirl ? '👨‍💼' : '👩‍💼',
+                  style: TextStyle(fontSize: 16),
+                ),
+              ),
+            ),
+            SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    otherUserData['nickname'] ?? '',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    (otherUserData['isOnline'] == true) ? 'オンライン' : 'オフライン',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.white.withOpacity(0.8),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Colors.grey.shade50, Colors.white],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                ),
+              ),
+              child: StreamBuilder<QuerySnapshot>(
+                stream: _firestore
+                    .collection('chats')
+                    .doc(chatId)
+                    .collection('messages')
+                    .orderBy('timestamp', descending: false)
+                    .snapshots(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return Center(
+                      child: CircularProgressIndicator(color: appBarColor),
+                    );
+                  }
+
+                  if (snapshot.hasError) {
+                    print('StreamBuilder エラー: ${snapshot.error}');
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text('💬', style: TextStyle(fontSize: 64)),
+                          SizedBox(height: 16),
+                          Text(
+                            'メッセージを送って会話を始めましょう！',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                          SizedBox(height: 8),
+                          Text(
+                            'Firestoreルール設定が必要な場合があります',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+
+                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text('💬', style: TextStyle(fontSize: 64)),
+                          SizedBox(height: 16),
+                          Text(
+                            'メッセージを送って会話を始めましょう！',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+
+                  final messages = snapshot.data!.docs;
+
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (_scrollController.hasClients) {
+                      _scrollController.animateTo(
+                        _scrollController.position.maxScrollExtent,
+                        duration: Duration(milliseconds: 300),
+                        curve: Curves.easeOut,
+                      );
+                    }
+                  });
+
+                  return ListView.builder(
+                    controller: _scrollController,
+                    padding: EdgeInsets.all(16),
+                    itemCount: messages.length,
+                    itemBuilder: (context, index) {
+                      final messageDoc = messages[index];
+                      final messageData = messageDoc.data() as Map<String, dynamic>;
+                      
+                      final text = messageData['text'] ?? '';
+                      final senderId = messageData['senderId'] ?? '';
+                      final timestamp = messageData['timestamp'] as Timestamp?;
+                      final isCurrentUser = senderId == currentUserId;
+
+                      return _buildMessageBubble(
+                        text: text,
+                        isCurrentUser: isCurrentUser,
+                        timestamp: timestamp?.toDate(),
+                        appBarColor: appBarColor,
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ),
+          _buildMessageInput(appBarColor),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMessageBubble({
+    required String text,
+    required bool isCurrentUser,
+    DateTime? timestamp,
+    required Color appBarColor,
+  }) {
+    return Align(
+      alignment: isCurrentUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: EdgeInsets.only(
+          bottom: 12,
+          left: isCurrentUser ? 48 : 0,
+          right: isCurrentUser ? 0 : 48,
+        ),
+        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: isCurrentUser ? appBarColor : Colors.white,
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(18),
+            topRight: Radius.circular(18),
+            bottomLeft: Radius.circular(isCurrentUser ? 18 : 4),
+            bottomRight: Radius.circular(isCurrentUser ? 4 : 18),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 6,
+              offset: Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              text,
+              style: TextStyle(
+                color: isCurrentUser ? Colors.white : Colors.grey.shade800,
+                fontSize: 14,
+                height: 1.4,
+              ),
+            ),
+            SizedBox(height: 6),
+            Text(
+              timestamp != null ? _formatTime(timestamp) : '送信中...',
+              style: TextStyle(
+                color: isCurrentUser 
+                    ? Colors.white.withOpacity(0.7)
+                    : Colors.grey.shade500,
+                fontSize: 11,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMessageInput(Color appBarColor) {
+    return Container(
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: Colors.grey.shade300)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 6,
+            offset: Offset(0, -3),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.grey.shade50,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: TextField(
+                controller: _messageController,
+                decoration: InputDecoration(
+                  hintText: 'メッセージを入力...',
+                  hintStyle: TextStyle(color: Colors.grey.shade500),
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                ),
+                maxLines: null,
+                onSubmitted: (_) => _handleSendMessage(),
+                textInputAction: TextInputAction.send,
+              ),
+            ),
+          ),
+          SizedBox(width: 12),
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [appBarColor, appBarColor.withOpacity(0.8)],
+              ),
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: appBarColor.withOpacity(0.3),
+                  blurRadius: 6,
+                  offset: Offset(0, 3),
+                ),
+              ],
+            ),
+            child: IconButton(
+              onPressed: _handleSendMessage,
+              icon: Icon(Icons.send, color: Colors.white, size: 20),
+              padding: EdgeInsets.all(12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _messageController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+}ading: false,
+      ),
+      body: _buildCurrentPage(),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) => setState(() => _currentIndex = index),
+        type: BottomNavigationBarType.fixed,
+        selectedItemColor: Colors.blue.shade600,
+        unselectedItemColor: Colors.grey,
+        items: [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.search),
+            label: 'キャスト検索',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.calendar_today),
+            label: '予約管理',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.assessment),
+            label: '報告・評価',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.message),
+            label: 'メッセージ',
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getAppBarTitle() {
+    switch (_currentIndex) {
+      case 0: return 'キャスト検索';
+      case 1: return '予約管理';
+      case 2: return '報告・評価';
+      case 3: return 'メッセージ';
+      default: return 'ギャラ飲み';
+    }
+  }
+
+  Widget _buildCurrentPage() {
+    switch (_currentIndex) {
+      case 0: return _buildGirlsListPage();
+      case 1: return CustomerBookingPage(userData: widget.userData, uid: widget.uid);
+      case 2: return CustomerReportsPage(userData: widget.userData, uid: widget.uid);
+      case 3: return CustomerMessagesPage(userData: widget.userData, uid: widget.uid);
+      default: return _buildGirlsListPage();
+    }
+  }
+
+  Widget _buildGirlsListPage() {
+    return Column(
+      children: [
+        Container(
+          padding: EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                blurRadius: 4,
+                offset: Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.location_on, color: Colors.blue.shade600),
+              SizedBox(width: 12),
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  value: _selectedLocation,
+                  decoration: InputDecoration(
+                    labelText: '地域で絞り込み',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  ),
+                  items: _locations.map((location) {
+                    return DropdownMenuItem(
+                      value: location,
+                      child: Text(location),
+                    );
+                  }).toList(),
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedLocation = value;
+                    });
+                  },
+                ),
+              ),
+              SizedBox(width: 12),
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade600,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: IconButton(
+                  onPressed: () {
+                    setState(() {});
+                  },
+                  icon: Icon(Icons.search, color: Colors.white),
+                  tooltip: '検索',
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: StreamBuilder<QuerySnapshot>(
+            stream: _getFilteredStream(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return Center(
+                  child: CircularProgressIndicator(color: Colors.blue.shade600),
+                );
+              }
+
+              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                return Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text('😢', style: TextStyle(fontSize: 64)),
+                      SizedBox(height: 16),
+                      Text(
+                        _selectedLocation == '全ての地域' 
+                            ? (_showOfflineUsers ? '条件に合う女の子はいません' : '現在オンラインの女の子はいません')
+                            : '${_selectedLocation}に${_showOfflineUsers ? '' : 'オンラインの'}女の子はいません',
+                        style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
+                        textAlign: TextAlign.center,
+                      ),
+                      SizedBox(height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          ElevatedButton(
+                            onPressed: () {
+                              setState(() {
+                                _selectedLocation = '全ての地域';
+                              });
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blue.shade600,
+                              foregroundColor: Colors.white,
+                            ),
+                            child: Text('全ての地域で検索'),
+                          ),
+                          if (!_showOfflineUsers) ...[
+                            SizedBox(width: 12),
+                            ElevatedButton(
+                              onPressed: () {
+                                setState(() {
+                                  _showOfflineUsers = true;
+                                });
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.grey.shade600,
+                                foregroundColor: Colors.white,
+                              ),
+                              child: Text('オフラインも表示'),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              final girls = snapshot.data!.docs;
+
+              return ListView.builder(
+                padding: EdgeInsets.all(16),
+                itemCount: girls.length,
+                itemBuilder: (context, index) {
+                  final girlData = girls[index].data() as Map<String, dynamic>;
+                  return _buildGirlCard(context, girlData, girls[index].id);
+                },
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGirlCard(BuildContext context, Map<String, dynamic> girlData, String girlId) {
+    return Card(
+      margin: EdgeInsets.only(bottom: 16),
+      elevation: 8,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          gradient: LinearGradient(
+            colors: [Colors.white, Colors.pink.shade50.withOpacity(0.3)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Padding(
+          padding: EdgeInsets.all(20),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Stack(
+                    children: [
+                      Container(
+                        width: 80,
+                        height: 80,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.pink.shade100,
+                          border: Border.all(
+                            color: (girlData['isOnline'] == true) ? Colors.green : Colors.grey.shade400,
+                            width: 3,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.pink.shade200.withOpacity(0.5),
+                              blurRadius: 8,
+                              offset: Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Center(
+                          child: Text(
+                            '👩‍💼',
+                            style: TextStyle(fontSize: 40),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        bottom: 0,
+                        right: 0,
+                        child: Container(
+                          width: 24,
+                          height: 24,
+                          decoration: BoxDecoration(
+                            color: (girlData['isOnline'] == true) ? Colors.green : Colors.grey.shade400,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 3),
+                          ),
+                          child: Icon(
+                            (girlData['isOnline'] == true) ? Icons.circle : Icons.circle,
+                            size: 12,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                '${girlData['nickname']} (${girlData['age']}歳)',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.grey.shade800,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (girlData['hourlyRate'] != null)
+                              Container(
+                                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [Colors.pink.shade500, Colors.purple.shade400],
+                                  ),
+                                  borderRadius: BorderRadius.circular(15),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.pink.shade300.withOpacity(0.5),
+                                      blurRadius: 4,
+                                      offset: Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: Text(
+                                  '${girlData['hourlyRate']}円/時',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        SizedBox(height: 6),
+                        if (girlData['location'] != null)
+                          Row(
+                            children: [
+                              Icon(Icons.location_on, size: 16, color: Colors.blue.shade600),
+                              SizedBox(width: 4),
+                              Text(
+                                girlData['location'],
+                                style: TextStyle(
+                                  color: Colors.blue.shade600,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              SizedBox(width: 12),
+                              Container(
+                                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: (girlData['isOnline'] == true) ? Colors.green.shade50 : Colors.grey.shade100,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: (girlData['isOnline'] == true) ? Colors.green.shade200 : Colors.grey.shade300,
+                                  ),
+                                ),
+                                child: Text(
+                                  (girlData['isOnline'] == true) ? '🟢 オンライン' : '⚫ オフライン',
+                                  style: TextStyle(
+                                    color: (girlData['isOnline'] == true) ? Colors.green.shade700 : Colors.grey.shade600,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        SizedBox(height: 10),
+                        Text(
+                          girlData['introduction'] ?? 'よろしくお願いします♪',
+                          style: TextStyle(
+                            color: Colors.grey.shade700,
+                            fontSize: 14,
+                            height: 1.3,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              if (girlData['tags'] != null && (girlData['tags'] as List).isNotEmpty) ...[
+                SizedBox(height: 16),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: (girlData['tags'] as List<dynamic>).take(4).map((tag) {
+                      return Container(
+                        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.pink.shade50,
+                          borderRadius: BorderRadius.circular(15),
+                          border: Border.all(color: Colors.pink.shade200),
+                        ),
+                        child: Text(
+                          tag.toString(),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.pink.shade700,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
+              SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => GirlCalendarScreen(
+                              girlData: girlData,
+                              girlUid: girlId,
+                              customerData: widget.userData,
+                              customerUid: widget.uid,
+                            ),
+                          ),
+                        );
+                      },
+                      icon: Icon(Icons.calendar_today, size: 18),
+                      label: Text('スケジュール'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.purple.shade600,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        elevation: 3,
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => MessageScreen(
+                              customerData: widget.userData,
+                              customerUid: widget.uid,
+                              girlData: girlData,
+                              girlUid: girlId,
+                            ),
+                          ),
+                        );
+                      },
+                      icon: Icon(Icons.message_outlined, size: 18),
+                      label: Text('メッセージ'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green.shade600,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        elevation: 3,
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: 8),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.blue.shade200),
+                    ),
+                    child: IconButton(
+                      onPressed: () {
+                        _showGirlDetails(context, girlData);
+                      },
+                      icon: Icon(Icons.info_outline, color: Colors.blue.shade600),
+                      tooltip: '詳細表示',
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showGirlDetails(BuildContext context, Map<String, dynamic> girlData) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Container(
+            padding: EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              gradient: LinearGradient(
+                colors: [Colors.white, Colors.pink.shade50.withOpacity(0.3)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 120,
+                  height: 120,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.pink.shade100,
+                    border: Border.all(color: Colors.pink.shade300, width: 3),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.pink.shade200.withOpacity(0.5),
+                        blurRadius: 10,
+                        offset: Offset(0, 5),
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: Text(
+                      '👩‍💼',
+                      style: TextStyle(fontSize: 60),
+                    ),
+                  ),
+                ),
+                SizedBox(height: 16),
+                Text(
+                  '${girlData['nickname']}',
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey.shade800,
+                  ),
+                ),
+                SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.cake_outlined, size: 16, color: Colors.grey.shade600),
+                    SizedBox(width: 4),
+                    Text('${girlData['age']}歳'),
+                    SizedBox(width: 16),
+                    Icon(Icons.location_on_outlined, size: 16, color: Colors.grey.shade600),
+                    SizedBox(width: 4),
+                    Text(girlData['location'] ?? ''),
+                  ],
+                ),
+                if (girlData['hourlyRate'] != null) ...[
+                  SizedBox(height: 8),
+                  Container(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Colors.pink.shade500, Colors.purple.shade400],
+                      ),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      '時給: ${girlData['hourlyRate']}円',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+                SizedBox(height: 16),
+                if (girlData['introduction'] != null) ...[
+                  Text(
+                    '自己紹介',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    girlData['introduction'],
+                    style: TextStyle(
+                      fontSize: 14,
+                      height: 1.4,
+                      color: Colors.grey.shade600,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  SizedBox(height: 16),
+                ],
+                if (girlData['tags'] != null && (girlData['tags'] as List).isNotEmpty) ...[
+                  Text(
+                    'タグ',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: (girlData['tags'] as List<dynamic>).map((tag) {
+                      return Container(
+                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.pink.shade50,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.pink.shade200),
+                        ),
+                        child: Text(
+                          tag.toString(),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.pink.shade700,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  SizedBox(height: 20),
+                ],
+                ElevatedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.grey.shade600,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text('閉じる'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _logout(BuildContext context) async {
+    try {
+      await FirebaseAuth.instance.signOut();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('ログアウトに失敗しました')),
+      );
+    }
+  }
+}
+
+// 📅 カレンダー機能 - キャストのスケジュール表示
+class GirlCalendarScreen extends StatefulWidget {
+  final Map<String, dynamic> girlData;
+  final String girlUid;
+  final Map<String, dynamic> customerData;
+  final String customerUid;
+
+  GirlCalendarScreen({
+    required this.girlData,
+    required this.girlUid,
+    required this.customerData,
+    required this.customerUid,
+  });
+
+  @override
+  _GirlCalendarScreenState createState() => _GirlCalendarScreenState();
+}
+
+class _GirlCalendarScreenState extends State<GirlCalendarScreen> {
+  DateTime _selectedDate = DateTime.now();
+  DateTime _focusedDay = DateTime.now();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('${widget.girlData['nickname']}のスケジュール'),
+        backgroundColor: Colors.purple.shade600,
+        foregroundColor: Colors.white,
+      ),
+      body: Column(
+        children: [
+          Container(
+            padding: EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Colors.purple.shade50, Colors.pink.shade50],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 60,
+                  height: 60,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.purple.shade100,
+                    border: Border.all(color: Colors.purple.shade300, width: 2),
+                  ),
+                  child: Center(
+                    child: Text(
+                      '👩‍💼',
+                      style: TextStyle(fontSize: 30),
+                    ),
+                  ),
+                ),
+                SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.girlData['nickname'],
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.purple.shade700,
+                        ),
+                      ),
+                      Text(
+                        '時給: ${widget.girlData['hourlyRate']}円',
+                        style: TextStyle(
+                          color: Colors.purple.shade600,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('availability')
+                  .where('girlUid', isEqualTo: widget.girlUid)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                List<Map<String, dynamic>> availableSlots = [];
+                if (snapshot.hasData) {
+                  for (var doc in snapshot.data!.docs) {
+                    final data = doc.data() as Map<String, dynamic>;
+                    availableSlots.add({...data, 'id': doc.id});
+                  }
+                }
+
+                return SingleChildScrollView(
+                  padding: EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      _buildCalendarWidget(availableSlots),
+                      SizedBox(height: 24),
+                      _buildAvailableTimeSlots(availableSlots),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCalendarWidget(List<Map<String, dynamic>> availableSlots) {
+    return Card(
+      elevation: 8,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        padding: EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: LinearGradient(
+            colors: [Colors.white, Colors.purple.shade50.withOpacity(0.3)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                IconButton(
+                  onPressed: () {
+                    setState(() {
+                      _focusedDay = DateTime(_focusedDay.year, _focusedDay.month - 1);
+                    });
+                  },
+                  icon: Icon(Icons.chevron_left, color: Colors.purple.shade600),
+                ),
+                Text(
+                  '${_focusedDay.year}年 ${_focusedDay.month}月',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.purple.shade700,
+                  ),
+                ),
+                IconButton(
+                  onPressed: () {
+                    setState(() {
+                      _focusedDay = DateTime(_focusedDay.year, _focusedDay.month + 1);
+                    });
+                  },
+                  icon: Icon(Icons.chevron_right, color: Colors.purple.shade600),
+                ),
+              ],
+            ),
+            SizedBox(height: 16),
+            _buildCalendarGrid(availableSlots),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCalendarGrid(List<Map<String, dynamic>> availableSlots) {
+    final daysInMonth = DateTime(_focusedDay.year, _focusedDay.month + 1, 0).day;
+    final firstDayOfMonth = DateTime(_focusedDay.year, _focusedDay.month, 1);
+    final startingWeekday = firstDayOfMonth.weekday % 7;
+
+    return Column(
+      children: [
+        Row(
+          children: ['日', '月', '火', '水', '木', '金', '土'].map((day) {
+            return Expanded(
+              child: Container(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  day,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey.shade700,
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        ...List.generate(6, (weekIndex) {
+          return Row(
+            children: List.generate(7, (dayIndex) {
+              final dayNumber = weekIndex * 7 + dayIndex - startingWeekday + 1;
+              if (dayNumber < 1 || dayNumber > daysInMonth) {
+                return Expanded(child: SizedBox(height: 40));
+              }
+
+              final date = DateTime(_focusedDay.year, _focusedDay.month, dayNumber);
+              final hasAvailability = availableSlots.any((slot) {
+                final slotDate = (slot['date'] as Timestamp).toDate();
+                return slotDate.year == date.year &&
+                       slotDate.month == date.month &&
+                       slotDate.day == date.day;
+              });
+
+              final isSelected = _selectedDate.year == date.year &&
+                               _selectedDate.month == date.month &&
+                               _selectedDate.day == date.day;
+
+              return Expanded(
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _selectedDate = date;
+                    });
+                  },
+                  child: Container(
+                    height: 40,
+                    margin: EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      color: isSelected 
+                          ? Colors.purple.shade600
+                          : hasAvailability 
+                              ? Colors.green.shade100
+                              : Colors.transparent,
+                      borderRadius: BorderRadius.circular(8),
+                      border: hasAvailability 
+                          ? Border.all(color: Colors.green.shade300)
+                          : null,
+                    ),
+                    child: Center(
+                      child: Text(
+                        dayNumber.toString(),
+                        style: TextStyle(
+                          color: isSelected 
+                              ? Colors.white
+                              : hasAvailability 
+                                  ? Colors.green.shade700
+                                  : Colors.grey.shade600,
+                          fontWeight: hasAvailability ? FontWeight.bold : FontWeight.normal,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }),
+          );
+        }),
+      ],
+    );
+  }
+
+  Widget _buildAvailableTimeSlots(List<Map<String, dynamic>> availableSlots) {
+    final selectedDaySlots = availableSlots.where((slot) {
+      final slotDate = (slot['date'] as Timestamp).toDate();
+      return slotDate.year == _selectedDate.year &&
+             slotDate.month == _selectedDate.month &&
+             slotDate.day == _selectedDate.day;
+    }).toList();
+
+    return Card(
+      elevation: 8,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: double.infinity,
+        padding: EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: LinearGradient(
+            colors: [Colors.white, Colors.green.shade50.withOpacity(0.3)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.access_time, color: Colors.green.shade600, size: 24),
+                SizedBox(width: 8),
+                Text(
+                  '${_selectedDate.month}/${_selectedDate.day} の空き時間',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green.shade700,
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 16),
+            if (selectedDaySlots.isEmpty)
+              Container(
+                padding: EdgeInsets.all(24),
+                child: Column(
+                  children: [
+                    Text('😔', style: TextStyle(fontSize: 48)),
+                    SizedBox(height: 12),
+                    Text(
+                      'この日は空きがありません',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      '他の日を選択してください',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey.shade500,
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              ...selectedDaySlots.map((slot) => _buildTimeSlotCard(slot)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTimeSlotCard(Map<String, dynamic> slot) {
+    final startTime = slot['startTime'] ?? '';
+    final endTime = slot['endTime'] ?? '';
+    final isBooked = slot['isBooked'] ?? false;
+
+    return Container(
+      margin: EdgeInsets.only(bottom: 12),
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isBooked ? Colors.grey.shade100 : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isBooked ? Colors.grey.shade300 : Colors.green.shade300,
+          width: 2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 4,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: isBooked ? Colors.grey.shade300 : Colors.green.shade100,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              '$startTime - $endTime',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: isBooked ? Colors.grey.shade600 : Colors.green.shade700,
+              ),
+            ),
+          ),
+          SizedBox(width: 16),
+          Expanded(
+            child: Text(
+              isBooked ? '予約済み' : '予約可能',
+              style: TextStyle(
+                color: isBooked ? Colors.grey.shade600 : Colors.green.shade700,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          if (!isBooked)
+            ElevatedButton(
+              onPressed: () => _showBookingDialog(slot),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.purple.shade600,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              ),
+              child: Text('予約する'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _showBookingDialog(Map<String, dynamic> slot) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              Icon(Icons.calendar_today, color: Colors.purple.shade600),
+              SizedBox(width: 8),
+              Text('予約確認'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('以下の内容で予約しますか？'),
+              SizedBox(height: 16),
+              Container(
+                padding: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.purple.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.purple.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'キャスト: ${widget.girlData['nickname']}',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    SizedBox(height: 8),
+                    Text('日付: ${_selectedDate.month}/${_selectedDate.day}'),
+                    Text('時間: ${slot['startTime']} - ${slot['endTime']}'),
+                    Text('時給: ${widget.girlData['hourlyRate']}円'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text('キャンセル'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _createBooking(slot);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.purple.shade600,
+                foregroundColor: Colors.white,
+              ),
+              child: Text('予約する'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _createBooking(Map<String, dynamic> slot) async {
+    try {
+      final bookingData = {
+        'customerUid': widget.customerUid,
+        'girlUid': widget.girlUid,
+        'date': slot['date'],
+        'startTime': slot['startTime'],
+        'endTime': slot['endTime'],
+        'hourlyRate': widget.girlData['hourlyRate'],
+        'status': 'pending',
+        'createdAt': FieldValue.serverTimestamp(),
+        'customerName': widget.customerData['nickname'],
+        'girlName': widget.girlData['nickname'],
+      };
+
+      await FirebaseFirestore.instance.collection('bookings').add(bookingData);
+
+      await FirebaseFirestore.instance
+          .collection('availability')
+          .doc(slot['id'])
+          .update({'isBooked': true});
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✨ 予約リクエストを送信しました！'),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+      Navigator.pop(context);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('予約に失敗しました: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}
+
+// 📊 お客様用の予約管理画面
+class CustomerBookingPage extends StatelessWidget {
+  final Map<String, dynamic> userData;
+  final String uid;
+
+  CustomerBookingPage({required this.userData, required this.uid});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('bookings')
+          .where('customerUid', isEqualTo: uid)
+          .orderBy('date', descending: false)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(child: CircularProgressIndicator());
+        }
+
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text('📅', style: TextStyle(fontSize: 64)),
+                SizedBox(height: 16),
+                Text(
+                  'まだ予約がありません',
+                  style: TextStyle(fontSize: 18, color: Colors.grey.shade600),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'キャストを検索して予約してみましょう！',
+                  style: TextStyle(fontSize: 14, color: Colors.grey.shade500),
+                ),
+              ],
+            ),
+          );
+        }
+
+        final bookings = snapshot.data!.docs;
+
+        return ListView.builder(
+          padding: EdgeInsets.all(16),
+          itemCount: bookings.length,
+          itemBuilder: (context, index) {
+            final booking = bookings[index].data() as Map<String, dynamic>;
+            return _buildBookingCard(context, booking, bookings[index].id);
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildBookingCard(BuildContext context, Map<String, dynamic> booking, String bookingId) {
+    final date = (booking['date'] as Timestamp).toDate();
+    final status = booking['status'] ?? 'pending';
+    
+    Color statusColor;
+    String statusText;
+    IconData statusIcon;
+    
+    switch (status) {
+      case 'confirmed':
+        statusColor = Colors.green;
+        statusText = '予約確定';
+        statusIcon = Icons.check_circle;
+        break;
+      case 'rejected':
+        statusColor = Colors.red;
+        statusText = '予約拒否';
+        statusIcon = Icons.cancel;
+        break;
+      case 'completed':
+        statusColor = Colors.blue;
+        statusText = '完了';
+        statusIcon = Icons.done_all;
+        break;
+      default:
+        statusColor = Colors.orange;
+        statusText = '承認待ち';
+        statusIcon = Icons.schedule;
+    }
+
+    return Card(
+      margin: EdgeInsets.only(bottom: 16),
+      elevation: 8,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: LinearGradient(
+            colors: [Colors.white, statusColor.withOpacity(0.1)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Padding(
+          padding: EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    booking['girlName'] ?? '',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey.shade800,
+                    ),
+                  ),
+                  Container(
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: statusColor,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(statusIcon, size: 16, color: Colors.white),
+                        SizedBox(width: 4),
+                        Text(
+                          statusText,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 12),
+              Row(
+                children: [
+                  Icon(Icons.calendar_today, size: 16, color: Colors.grey.shade600),
+                  SizedBox(width: 8),
+                  Text('${date.month}/${date.day} (${_getWeekday(date.weekday)})'),
+                  SizedBox(width: 16),
+                  Icon(Icons.access_time, size: 16, color: Colors.grey.shade600),
+                  SizedBox(width: 8),
+                  Text('${booking['startTime']} - ${booking['endTime']}'),
+                ],
+              ),
+              SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(Icons.monetization_on, size: 16, color: Colors.grey.shade600),
+                  SizedBox(width: 8),
+                  Text('時給: ${booking['hourlyRate']}円'),
+                ],
+              ),
+              if (status == 'confirmed' || status == 'completed') ...[
+                SizedBox(height: 16),
+                Row(
+                  children: [
+                    if (status == 'confirmed')
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: () => _showCancelDialog(context, bookingId),
+                          icon: Icon(Icons.cancel_outlined, size: 18),
+                          label: Text('キャンセル'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.grey.shade600,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (status == 'completed') ...[
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => CreateReportScreen(
+                                  booking: booking,
+                                  bookingId: bookingId,
+                                ),
+                              ),
+                            );
+                          },
+                          icon: Icon(Icons.rate_review, size: 18),
+                          label: Text('報告・評価'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue.shade600,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _getWeekday(int weekday) {
+    const weekdays = ['月', '火', '水', '木', '金', '土', '日'];
+    return weekdays[weekday - 1];
+  }
+
+  void _showCancelDialog(BuildContext context, String bookingId) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('予約キャンセル'),
+          content: Text('この予約をキャンセルしますか？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text('いいえ'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _cancelBooking(context, bookingId);
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              child: Text('キャンセル'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _cancelBooking(BuildContext context, String bookingId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('bookings')
+          .doc(bookingId)
+          .update({'status': 'cancelled'});
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('予約をキャンセルしました'),
+          backgroundColor: Colors.grey.shade600,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('キャンセルに失敗しました'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}
+
+// 📊 お客様用の報告・評価画面
+class CustomerReportsPage extends StatelessWidget {
+  final Map<String, dynamic> userData;
+  final String uid;
+
+  CustomerReportsPage({required this.userData, required this.uid});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('reports')
+          .where('customerUid', isEqualTo: uid)
+          .orderBy('createdAt', descending: true)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(child: CircularProgressIndicator());
+        }
+
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text('📝', style: TextStyle(fontSize: 64)),
+                SizedBox(height: 16),
+                Text(
+                  'まだ報告がありません',
+                  style: TextStyle(fontSize: 18, color: Colors.grey.shade600),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'ギャラ飲み完了後に報告を作成できます',
+                  style: TextStyle(fontSize: 14, color: Colors.grey.shade500),
+                ),
+              ],
+            ),
+          );
+        }
+
+        final reports = snapshot.data!.docs;
+
+        return ListView.builder(
+          padding: EdgeInsets.all(16),
+          itemCount: reports.length,
+          itemBuilder: (context, index) {
+            final report = reports[index].data() as Map<String, dynamic>;
+            return _buildReportCard(report);
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildReportCard(Map<String, dynamic> report) {
+    final rating = (report['rating'] ?? 0).toDouble();
+    final createdAt = (report['createdAt'] as Timestamp?)?.toDate();
+
+    return Card(
+      margin: EdgeInsets.only(bottom: 16),
+      elevation: 8,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: LinearGradient(
+            colors: [Colors.white, Colors.blue.shade50.withOpacity(0.3)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Padding(
+          padding: EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    report['girlName'] ?? '',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey.shade800,
+                    ),
+                  ),
+                  Row(
+                    children: List.generate(5, (index) {
+                      return Icon(
+                        index < rating ? Icons.star : Icons.star_border,
+                        color: Colors.amber,
+                        size: 20,
+                      );
+                    }),
+                  ),
+                ],
+              ),
+              SizedBox(height: 8),
+              if (createdAt != null)
+                Text(
+                  '${createdAt.month}/${createdAt.day} ${createdAt.hour}:${createdAt.minute.toString().padLeft(2, '0')}',
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                ),
+              SizedBox(height: 12),
+              if (report['comment'] != null && report['comment'].isNotEmpty) ...[
+                Container(
+                  width: double.infinity,
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: Text(
+                    report['comment'],
+                    style: TextStyle(fontSize: 14, height: 1.4),
+                  ),
+                ),
+                SizedBox(height: 12),
+              ],
+              Row(
+                children: [
+                  Icon(Icons.monetization_on, size: 16, color: Colors.green.shade600),
+                  SizedBox(width: 4),
+                  Text(
+                    '支払い: ${report['totalAmount'] ?? 0}円',
+                    style: TextStyle(
+                      color: Colors.green.shade700,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// 💬 お客様用のメッセージ画面
+class CustomerMessagesPage extends StatelessWidget {
+  final Map<String, dynamic> userData;
+  final String uid;
+
+  CustomerMessagesPage({required this.userData, required this.uid});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('chats')
+          .where('participants', arrayContains: uid)
+          .orderBy('lastMessageTime', descending: true)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(child: CircularProgressIndicator());
+        }
+
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text('💌', style: TextStyle(fontSize: 64)),
+                SizedBox(height: 16),
+                Text(
+                  'まだメッセージはありません',
+                  style: TextStyle(fontSize: 18, color: Colors.grey.shade600),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'キャストとメッセージを始めましょう！',
+                  style: TextStyle(fontSize: 14, color: Colors.grey.shade500),
+                ),
+              ],
+            ),
+          );
+        }
+
+        final chats = snapshot.data!.docs;
+
+        return ListView.builder(
+          padding: EdgeInsets.all(16),
+          itemCount: chats.length,
+          itemBuilder: (context, index) {
+            final chatData = chats[index].data() as Map<String, dynamic>;
+            final participants = List<String>.from(chatData['participants'] ?? []);
+            final otherUserId = participants.firstWhere((id) => id != uid, orElse: () => '');
+            
+            if (otherUserId.isEmpty) return SizedBox.shrink();
+            
+            return FutureBuilder<DocumentSnapshot>(
+              future: FirebaseFirestore.instance.collection('users').doc(otherUserId).get(),
+              builder: (context, userSnapshot) {
+                if (!userSnapshot.hasData || !userSnapshot.data!.exists) {
+                  return SizedBox.shrink();
+                }
+
+                final otherUserData = userSnapshot.data!.data() as Map<String, dynamic>;
+                return _buildChatItem(context, chatData, otherUserData, otherUserId);
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildChatItem(BuildContext context, Map<String, dynamic> chatData, Map<String, dynamic> otherUserData, String otherUserId) {
+    final lastMessage = chatData['lastMessage'] ?? '';
+    final lastMessageTime = (chatData['lastMessageTime'] as Timestamp?)?.toDate();
+
+    return Card(
+      margin: EdgeInsets.only(bottom: 12),
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: InkWell(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => MessageScreen(
+                customerData: userData,
+                customerUid: uid,
+                girlData: otherUserData,
+                girlUid: otherUserId,
+              ),
+            ),
+          );
+        },
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.pink.shade100,
+                  border: Border.all(color: Colors.pink.shade300, width: 2),
+                ),
+                child: Center(
+                  child: Text(
+                    '👩‍💼',
+                    style: TextStyle(fontSize: 25),
+                  ),
+                ),
+              ),
+              SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          otherUserData['nickname'] ?? '',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                        if (lastMessageTime != null)
+                          Text(
+                            '${lastMessageTime.month}/${lastMessageTime.day}',
+                            style: TextStyle(
+                              color: Colors.grey.shade500,
+                              fontSize: 12,
+                            ),
+                          ),
+                      ],
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      lastMessage,
+                      style: TextStyle(
+                        color: Colors.grey.shade600,
+                        fontSize: 14,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// 📝 報告作成画面
+class CreateReportScreen extends StatefulWidget {
+  final Map<String, dynamic> booking;
+  final String bookingId;
+
+  CreateReportScreen({required this.booking, required this.bookingId});
+
+  @override
+  _CreateReportScreenState createState() => _CreateReportScreenState();
+}
+
+class _CreateReportScreenState extends State<CreateReportScreen> {
+  double _rating = 5.0;
+  final _commentController = TextEditingController();
+  final _totalAmountController = TextEditingController();
+  bool _isLoading = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('報告・評価'),
+        backgroundColor: Colors.blue.shade600,
+        foregroundColor: Colors.white,
+      ),
+      body: SingleChildScrollView(
+        padding: EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Card(
+              elevation: 8,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: Container(
+                padding: EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  gradient: LinearGradient(
+                    colors: [Colors.white, Colors.blue.shade50.withOpacity(0.3)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'ギャラ飲み報告',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blue.shade700,
+                      ),
+                    ),
+                    SizedBox(height: 16),
+                    Container(
+                      padding: EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.blue.shade200),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'キャスト: ${widget.booking['girlName']}',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                          ),
+                          SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Icon(Icons.calendar_today, size: 16, color: Colors.blue.shade600),
+                              SizedBox(width: 8),
+                              Text('日時: ${_formatDate(widget.booking['date'])} ${widget.booking['startTime']} - ${widget.booking['endTime']}'),
+                            ],
+                          ),
+                          SizedBox(height: 4),
+                          Text('時給: ${widget.booking['hourlyRate']}円'),
+                        ],
+                      ),
+                    ),
+                    SizedBox(height: 24),
+                    Text(
+                      '評価',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey.shade800,
+                      ),
+                    ),
+                    SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: List.generate(5, (index) {
+                        return GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _rating = (index + 1).toDouble();
+                            });
+                          },
+                          child: Container(
+                            margin: EdgeInsets.symmetric(horizontal: 4),
+                            child: Icon(
+                              index < _rating ? Icons.star : Icons.star_border,
+                              color: Colors.amber,
+                              size: 40,
+                            ),
+                          ),
+                        );
+                      }),
+                    ),
+                    SizedBox(height: 24),
+                    TextField(
+                      controller: _totalAmountController,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: '実際の支払い金額',
+                        hintText: '実際に支払った金額を入力',
+                        suffixText: '円',
+                        prefixIcon: Icon(Icons.monetization_on),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: 16),
+                    TextField(
+                      controller: _commentController,
+                      maxLines: 4,
+                      decoration: InputDecoration(
+                        labelText: 'コメント（任意）',
+                        hintText: 'ギャラ飲みの感想や気づいたことを書いてください',
+                        prefixIcon: Icon(Icons.comment),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: 24),
+                    Container(
+                      width: double.infinity,
+                      height: 56,
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : _submitReport,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue.shade600,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                          elevation: 5,
+                        ),
+                        child: _isLoading
+                            ? CircularProgressIndicator(color: Colors.white)
+                            : Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.send, size: 20),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    '報告を送信',
+                                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                  ),
+                                ],
+                              ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatDate(Timestamp timestamp) {
+    final date = timestamp.toDate();
+    return '${date.month}/${date.day}';
+  }
+
+  Future<void> _submitReport() async {
+    if (_totalAmountController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('支払い金額を入力してください'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final reportData = {
+        'customerUid': widget.booking['customerUid'],
+        'girlUid': widget.booking['girlUid'],
+        'bookingId': widget.bookingId,
+        'girlName': widget.booking['girlName'],
+        'rating': _rating,
+        'comment': _commentController.text,
+        'totalAmount': int.tryParse(_totalAmountController.text) ?? 0,
+        'createdAt': FieldValue.serverTimestamp(),
+        'date': widget.booking['date'],
+        'startTime': widget.booking['startTime'],
+        'endTime': widget.booking['endTime'],
+      };
+
+      await FirebaseFirestore.instance.collection('reports').add(reportData);
+
+      // キャストの評価と収益を更新
+      final girlDoc = FirebaseFirestore.instance.collection('users').doc(widget.booking['girlUid']);
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final girlSnapshot = await transaction.get(girlDoc);
+        if (girlSnapshot.exists) {
+          final girlData = girlSnapshot.data() as Map<String, dynamic>;
+          final currentRating = (girlData['rating'] ?? 5.0).toDouble();
+          final reviewCount = (girlData['reviewCount'] ?? 0).toInt();
+          final totalEarnings = (girlData['totalEarnings'] ?? 0).toInt();
+          final totalSessions = (girlData['totalSessions'] ?? 0).toInt();
+
+          final newReviewCount = reviewCount + 1;
+          final newRating = ((currentRating * reviewCount) + _rating) / newReviewCount;
+          final newTotalEarnings = totalEarnings + (int.tryParse(_totalAmountController.text) ?? 0);
+          final newTotalSessions = totalSessions + 1;
+
+          transaction.update(girlDoc, {
+            'rating': newRating,
+            'reviewCount': newReviewCount,
+            'totalEarnings': newTotalEarnings,
+            'totalSessions': newTotalSessions,
+          });
+        }
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✨ 報告を送信しました！'),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+      Navigator.pop(context);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('報告の送信に失敗しました: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+}
+
+class GirlDashboard extends StatefulWidget {
+  final Map<String, dynamic> userData;
+  final String uid;
+
+  GirlDashboard({required this.userData, required this.uid});
+
+  @override
+  _GirlDashboardState createState() => _GirlDashboardState();
+}
+
+class _GirlDashboardState extends State<GirlDashboard> {
+  int _currentIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_getAppBarTitle()),
+        backgroundColor: Colors.pink.shade600,
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: Icon(Icons.logout),
+            onPressed: () => _logout(context),
+          ),
+          Padding(
+            padding: EdgeInsets.only(right: 16),
+            child: Center(
+              child: Text('${widget.userData['nickname']}さん'),
+            ),
+          ),
+        ],
+        automaticallyImplyLe
